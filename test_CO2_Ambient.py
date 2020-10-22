@@ -126,11 +126,11 @@ def draw_co2():
     elif co2 >= CO2_RED :  # CO2濃度閾値超え時は文字が赤くなる
         fc = lcd.RED
         if lcd_mute == True :   # CO2濃度閾値超え時はLCD ON
-            set_muteLCD(False):
+            set_muteLCD(False)
     else :
         fc = lcd.WHITE
         if lcd_mute == True :
-            set_muteLCD(True):
+            set_muteLCD(True)
         
     if Disp_mode == 0 : # 表示回転処理
         if m5type == 0 :
@@ -253,7 +253,7 @@ if lcd.winsize() == (80,160) :  # M5StickC/Plus機種判定
 elif lcd.winsize() == (136,241) :
     m5type = 1
     print('>> M5Type = M5StickCPlus')
-set_muteLCD(lcd_mute):
+set_muteLCD(lcd_mute)
 draw_lcd()
 
 
@@ -305,16 +305,17 @@ while True :
         utime.sleep(0.1)
         l = mhz19b.readinto(mhz19b_data)
         print('read '+str(l)+'bytes')
+        print('read data', mhz19b_data)
 
         # co2測定値リクエストの応答
         if (l == 9) and (mhz19b_data[0] == 0xff) and (mhz19b_data[1] == 0x86) and (checksum_chk(mhz19b_data) == True) :    # 応答かどうかの判定とチェックサムチェック
             mhz19b_tc = utime.time()
-            co2 = mhz19b_data[2] << 8 + mhz19b_data[3]
+            co2 = mhz19b_data[2] * 256 + mhz19b_data[3]
             temp = mhz19b_data[4] - 40
 
             data_mute = False
             draw_co2()
-            print(str(co2) + ' ppm / ' + str(mhz19b_tc))
+            print(str(co2) + ' ppm / ' + str(temp) + 'C / ' + str(mhz19b_tc))
             if (am_co2 is not None) :                           # Ambient設定情報があった場合
                 if (utime.time() - am_tc) >= am_interval :      # インターバル値の間隔でAmbientへsendする
                     try :                                       # ネットワーク不通発生などで例外エラー終了されない様に try except しとく
@@ -326,9 +327,6 @@ while True :
                         print('Ambient send ERR! / ' + str(Am_err))
                         Am_err = Am_err + 1
                     am_tc = utime.time()
-        else :
-            # エラーデータの表示
-            print(mhz19b_data)
         utime.sleep(1)
     
     if (utime.time() - mhz19b_tc) >= TIMEOUT : # co2応答が一定時間無い場合はCO2値表示のみオフ
