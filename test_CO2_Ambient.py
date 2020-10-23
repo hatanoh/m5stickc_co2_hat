@@ -114,6 +114,7 @@ def draw_lcd():
     draw_co2()
     draw_time()
 
+
 # CO2値表示処理関数
 def draw_co2():
     global Disp_mode, m5type
@@ -168,7 +169,7 @@ def draw_time():
     # Ambient通信不具合発生時は時計の文字が赤くなる
     fc = lcd.RED if Am_err else lcd.WHITE
 
-    if  Disp_mode == 0 : # 表示回転処理
+    if Disp_mode == 0 : # 表示回転処理
         if m5type == 0 :
             lcd.rect(0 , 0, 13, 160, lcd.BLACK, lcd.BLACK)
             lcd.font(lcd.FONT_DefaultSmall, rotate = 270)
@@ -238,12 +239,47 @@ def co2_set_filechk():
     return scanfile_flg
 
 
+# MH-Z19B control functions
+# see https://revspace.nl/MHZ19
+# auto caliblation off
+mhz19b = None
+
+def mhz19bOpen():
+    global mhz19b
+    
+    mhz19b = machine.UART(1, tx=0, rx=26)
+    mhz19b.init(9600, bits=8, parity=None, stop=1)
+
+
+def ABCdisable():
+    global mhz19b
+
+    mhz19b.write(b'\xff\x01\x79\x00\x00\x00\x00\x00\x86')
+    utime.sleep(0.1)
+
+    
+def readSensor()
+    global mhz19b
+
+    # co2要求コマンド送信
+    print('send read CO2 command')
+    mhz19b_data = bytearray(9)
+    mhz19b.write(b'\xff\x01\x86\x00\x00\x00\x00\x00\x79')   # co2測定値リクエスト
+    utime.sleep(0.1)
+    len = mhz19b.readinto(mhz19b_data)
+    print('read '+str(len)+'bytes')
+    print('read data', mhz19b_data)
+
+    # co2測定値リクエストの応答
+    if (len < 9) or (mhz19b_data[0] != 0xff) or checksum_chk(mhz19b_data) or (mhz19b_data[0] != 0xff) or (mhz19b_data[1] != 0x86) 
+        len = mhz19b.readinto(mhz19b_data)
+        print('drop broken frame('+str(len)+'): '+mhz19b_data)
+        return None
+
+    return [mhz19b_data[2] * 256 + mhz19b_data[3], mhz19b_data[4] - 40]
+
+
 # メインプログラムはここから（この上はプログラム内関数）
-
-
-# WiFi設定
-import wifiCfg
-wifiCfg.autoConnect(lcdShow=True)
 
 
 # 画面初期化
@@ -258,23 +294,27 @@ draw_lcd()
 
 
 # MH-19B UART設定
-mhz19b = machine.UART(1, tx=0, rx=26)
-mhz19b.init(9600, bits=8, parity=None, stop=1)
+mhz19bOpen()
 
 
 # ユーザー設定ファイル読み込み
 co2_set_filechk()
 
 
-# Ambient設定
+# ネットワーク設定
 am_co2 = None
-if (AM_ID is not None) and (AM_WKEY is not None) : # Ambient設定情報があった場合
-    import ambient
-    am_co2 = ambient.Ambient(AM_ID, AM_WKEY)
-
-
-# RTC設定
-ntp = ntptime.client(host='jp.pool.ntp.org', timezone=9)
+import wifiCfg
+try:
+    wifiCfg.autoConnect(lcdShow=True)
+except:
+    print('Network is down. / date is invalid now.')
+else:
+    if (AM_ID is not None) and (AM_WKEY is not None) : # Ambient設定情報があった場合
+        # Ambient設定
+        import ambient
+        am_co2 = ambient.Ambient(AM_ID, AM_WKEY)
+        # RTC設定
+        ntp = ntptime.client(host='jp.pool.ntp.org', timezone=9)
 
 
 # 時刻表示/LED制御スレッド起動
@@ -286,33 +326,23 @@ btnA.wasPressed(buttonA_wasPressed)
 btnB.wasPressed(buttonB_wasPressed)
 
 
+# ABC disable
+ABCdisable()
+
+
 # タイムカウンタ初期値設定
 mhz19b_tc = utime.time()
 am_tc = utime.time()
 
 
-# ABC disable
-mhz19b.write(b'\xff\x01\x79\x00\x00\x00\x00\x00\x86')
-utime.sleep(0.1)
-
-
 # メインルーチン
 while True :
-    if (utime.time() - mhz19b_tc) >= mhz19b_interval : # co2要求コマンド送信
-        print('send read CO2 command')
-        mhz19b_data = bytearray(9)
-        mhz19b.write(b'\xff\x01\x86\x00\x00\x00\x00\x00\x79')   # co2測定値リクエスト
-        utime.sleep(0.1)
-        l = mhz19b.readinto(mhz19b_data)
-        print('read '+str(l)+'bytes')
-        print('read data', mhz19b_data)
-
-        # co2測定値リクエストの応答
-        if (l == 9) and (mhz19b_data[0] == 0xff) and (mhz19b_data[1] == 0x86) and (checksum_chk(mhz19b_data) == True) :    # 応答かどうかの判定とチェックサムチェック
+    if (utime.time() - mhz19b_tc) >= mhz19b_interval : 
+        data = readSensor()
+        if data is not None :
             mhz19b_tc = utime.time()
-            co2 = mhz19b_data[2] * 256 + mhz19b_data[3]
-            temp = mhz19b_data[4] - 40
-
+            co2 = data[0]
+            temp = data[1]
             data_mute = False
             draw_co2()
             print(str(co2) + ' ppm / ' + str(temp) + 'C / ' + str(mhz19b_tc))
