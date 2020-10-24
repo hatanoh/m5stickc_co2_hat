@@ -236,7 +236,7 @@ def co2_set_filechk():
                     if len(filetxt[1]) == 16 :
                         AM_WKEY = str(filetxt[1])
                         print('- AM_WKEY: ' + str(AM_WKEY))
-                 elif filetxt[0] == 'AM_RKEY' :
+                elif filetxt[0] == 'AM_RKEY' :
                     if len(filetxt[1]) == 16 :
                         AM_RKEY = str(filetxt[1])
                         print('- AM_RKEY: ' + str(AM_RKEY))
