@@ -23,8 +23,10 @@ mhz19b_interval     = 5     # MH-19Bへco2測定値要求コマンドを送る�
 TIMEOUT             = 30    # 何らかの事情でCO2更新が止まった時のタイムアウト（秒）のデフォルト値
 CO2_RED             = 1000  # co2濃度の換気閾値（ppm）のデフォルト値
 #
-AM_ID               = None
+AM_CID              = None
 AM_WKEY             = None
+AM_RKEY             = None
+AM_UID              = None
 
 
 # @cinimlさんのファーム差分吸収ロジック
@@ -59,12 +61,12 @@ def disp_thread():
             LEDstate = (LED_mode < 0)
 
         # LEDの状態が変わらない場合はスキップ
-        if prevLED != LEDstate :
-            if LEDstate :
-                M5LED.on()
-            else :
-                M5LED.off()
-            prevLED = LEDstate
+#        if prevLED != LEDstate :
+#            if LEDstate :
+#                M5LED.on()
+#            else :
+#                M5LED.off()
+#            prevLED = LEDstate
 
         # 表示する情報が変わらない場合はスキップ
         tc = (utime.time(), Disp_mode, bool(Am_err))
@@ -227,13 +229,20 @@ def co2_set_filechk():
                     if int(filetxt[1]) >= 1 :
                         TIMEOUT = int(filetxt[1])
                         print('- TIMEOUT: ' + str(TIMEOUT))
-                elif filetxt[0] == 'AM_ID' :
-                    AM_ID = str(filetxt[1])
-                    print('- AM_ID: ' + str(AM_ID))
+                elif filetxt[0] == 'AM_CID' :
+                    AM_CID = str(filetxt[1])
+                    print('- AM_CID: ' + str(AM_CID))
                 elif filetxt[0] == 'AM_WKEY' :
                     if len(filetxt[1]) == 16 :
                         AM_WKEY = str(filetxt[1])
                         print('- AM_WKEY: ' + str(AM_WKEY))
+                 elif filetxt[0] == 'AM_RKEY' :
+                    if len(filetxt[1]) == 16 :
+                        AM_RKEY = str(filetxt[1])
+                        print('- AM_RKEY: ' + str(AM_RKEY))
+                elif filetxt[0] == 'AM_UID' :
+                    AM_UID = str(filetxt[1])
+                    print('- AM_UID: ' + str(AM_UID))
     else :
         print('>> no [co2_set.txt] !')       
     return scanfile_flg
@@ -254,11 +263,12 @@ def mhz19bOpen():
 def ABCdisable():
     global mhz19b
 
+    mhz19b_data = bytearray(9)
     mhz19b.write(b'\xff\x01\x79\x00\x00\x00\x00\x00\x86')
     utime.sleep(0.1)
-
+    len = mhz19b.readinto(mhz19b_data)
     
-def readSensor()
+def readSensor():
     global mhz19b
 
     # co2要求コマンド送信
@@ -271,9 +281,10 @@ def readSensor()
     print('read data', mhz19b_data)
 
     # co2測定値リクエストの応答
-    if (len < 9) or (mhz19b_data[0] != 0xff) or checksum_chk(mhz19b_data) or (mhz19b_data[0] != 0xff) or (mhz19b_data[1] != 0x86) 
+    if (len < 9) or (mhz19b_data[0] != 0xff) or not checksum_chk(mhz19b_data) or (mhz19b_data[0] != 0xff) or (mhz19b_data[1] != 0x86) :
         len = mhz19b.readinto(mhz19b_data)
-        print('drop broken frame('+str(len)+'): '+mhz19b_data)
+        print('drop broken frame(' + str(len) + '): ') 
+        print(mhz19b_data)
         return None
 
     return [mhz19b_data[2] * 256 + mhz19b_data[3], mhz19b_data[4] - 40]
@@ -289,8 +300,6 @@ if lcd.winsize() == (80,160) :  # M5StickC/Plus機種判定
 elif lcd.winsize() == (136,241) :
     m5type = 1
     print('>> M5Type = M5StickCPlus')
-set_muteLCD(lcd_mute)
-draw_lcd()
 
 
 # MH-19B UART設定
@@ -309,12 +318,17 @@ try:
 except:
     print('Network is down. / date is invalid now.')
 else:
-    if (AM_ID is not None) and (AM_WKEY is not None) : # Ambient設定情報があった場合
+    if (AM_CID is not None) and (AM_WKEY is not None) : # Ambient設定情報があった場合
         # Ambient設定
         import ambient
-        am_co2 = ambient.Ambient(AM_ID, AM_WKEY)
+        am_co2 = ambient.Ambient(AM_CID, AM_WKEY)
         # RTC設定
         ntp = ntptime.client(host='jp.pool.ntp.org', timezone=9)
+
+
+# 画面アップデート
+set_muteLCD(lcd_mute)
+draw_lcd()
 
 
 # 時刻表示/LED制御スレッド起動
