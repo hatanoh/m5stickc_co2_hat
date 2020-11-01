@@ -272,13 +272,13 @@ def readSensor():
     global mhz19b
 
     # co2要求コマンド送信
-    print('send read CO2 command')
+    #print('send read CO2 command')
     mhz19b_data = bytearray(9)
     mhz19b.write(b'\xff\x01\x86\x00\x00\x00\x00\x00\x79')   # co2測定値リクエスト
     utime.sleep(0.1)
     len = mhz19b.readinto(mhz19b_data)
-    print('read '+str(len)+'bytes')
-    print('read data', mhz19b_data)
+    #print('read '+str(len)+'bytes')
+    #print('read data', mhz19b_data)
 
     # co2測定値リクエストの応答
     if (len < 9) or (mhz19b_data[0] != 0xff) or not checksum_chk(mhz19b_data) or (mhz19b_data[0] != 0xff) or (mhz19b_data[1] != 0x86) :
@@ -312,18 +312,15 @@ co2_set_filechk()
 
 # ネットワーク設定
 am_co2 = None
+ntp = None
 import wifiCfg
-try:
-    wifiCfg.autoConnect(lcdShow=True)
-except:
-    print('Network is down. / date is invalid now.')
-else:
-    if (AM_CID is not None) and (AM_WKEY is not None) : # Ambient設定情報があった場合
-        # Ambient設定
-        import ambient
-        am_co2 = ambient.Ambient(AM_CID, AM_WKEY)
-        # RTC設定
-        ntp = ntptime.client(host='jp.pool.ntp.org', timezone=9)
+wifiCfg.autoConnect(lcdShow=True)
+
+import ambient
+am_co2 = ambient.Ambient(AM_CID, AM_WKEY)
+ntp = ntptime.client(host='jp.pool.ntp.org', timezone=9)
+#if (AM_CID is None) or (AM_WKEY is None) : # Ambient設定情報があった場合
+#    am_co2 = None
 
 
 # 画面アップデート
@@ -346,7 +343,7 @@ ABCdisable()
 
 # タイムカウンタ初期値設定
 mhz19b_tc = utime.time()
-am_tc = utime.time()
+am_tc = 0
 
 
 # メインルーチン
@@ -359,11 +356,11 @@ while True :
             temp = data[1]
             data_mute = False
             draw_co2()
-            print(str(co2) + ' ppm / ' + str(temp) + 'C / ' + str(mhz19b_tc))
+            #print(str(co2) + ' ppm / ' + str(temp) + 'C / ' + str(mhz19b_tc))
             if (am_co2 is not None) :                           # Ambient設定情報があった場合
                 if (utime.time() - am_tc) >= am_interval :      # インターバル値の間隔でAmbientへsendする
                     try :                                       # ネットワーク不通発生などで例外エラー終了されない様に try except しとく
-                        r = am_co2.send({'d1': co2, 'd2': temp})
+                        r = am_co2.send({'d1': co2})
                         print('Ambient send OK! / ' + str(r.status_code) + ' / ' + str(Am_err))
                         Am_err = 0
                         r.close()
@@ -373,7 +370,7 @@ while True :
                     am_tc = utime.time()
         utime.sleep(1)
     
-    if (utime.time() - mhz19b_tc) >= TIMEOUT : # co2応答が一定時間無い場合はCO2値表示のみオフ
+    if not data_mute and ((utime.time() - mhz19b_tc) >= TIMEOUT) : # co2応答が一定時間無い場合はCO2値表示のみオフ
         data_mute = True
         draw_co2()
         
