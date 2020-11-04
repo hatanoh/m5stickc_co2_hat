@@ -4,8 +4,10 @@ import gc
 import utime
 import uos
 import _thread
-import ntptime
 
+import wifiCfg
+import ntptime
+import ambient
 
 # 変数宣言(ワーク)
 Am_err              = 1     # グローバル
@@ -16,6 +18,7 @@ data_mute           = False # グローバル
 m5type              = 0     # グローバル [0:M5StickC、1: M5StickCPlus]
 co2                 = None  # グローバル 現在のCO2値
 temp                = None  # グローバル 現在の温度
+
 
 # 変数宣言(定数)
 am_interval         = 60    # Ambientへデータを送るサイクル（秒）
@@ -191,19 +194,6 @@ def draw_time():
             lcd.print('{}-{:02d}-{:02d} {:02d}:{:02d}:{:02d}'.format(*utime.localtime()[:6]), 131, 30, fc)
 
 
-# MH-Z19Bデータのチェックサム確認関数
-def checksum_chk(data):
-    sum = 0
-    for a in data[1:8]:
-        sum = (sum + a) & 0xff
-    c_sum = 0xff - sum + 1
-    if c_sum == data[8]:
-        return True
-    else:
-        print("c_sum un match!!")
-        return False
-
-
 # co2_set.txtの存在/中身チェック関数
 def co2_set_filechk():
     global CO2_RED
@@ -215,7 +205,7 @@ def co2_set_filechk():
     for file_name in uos.listdir('/flash') :
         if file_name == 'co2_set.txt' :
             scanfile_flg = True
-    
+
     if scanfile_flg :
         print('>> found [co2_set.txt] !')
         with open('/flash/co2_set.txt' , 'r') as f :
@@ -250,44 +240,43 @@ def co2_set_filechk():
 
 # MH-Z19B control functions
 # see https://revspace.nl/MHZ19
-# auto caliblation off
-mhz19b = None
+class mhz19blib(object):
+    def __init__():
+        self.buff = bytearray(9)
+        self.serial = machine.UART(1, tx=0, rx=26)
+        self.serial.init(9600, bits=8, parity=None, stop=1)
 
-def mhz19bOpen():
-    global mhz19b
-    
-    mhz19b = machine.UART(1, tx=0, rx=26)
-    mhz19b.init(9600, bits=8, parity=None, stop=1)
+    def checksum_chk(data):
+        sum = 0
+        for a in data[1:8]:
+            sum = (sum + a) & 0xff
+        c_sum = 0xff - sum + 1
+        if c_sum == data[8]:
+            return True
+        else:
+            print("c_sum un match!!")
+            return False
 
+    def ABCdisable():
+        self.serial.write(b'\xff\x01\x79\x00\x00\x00\x00\x00\x86')	# auto caliblation off
+        utime.sleep(0.1)
+        len = self.serial.readinto(self.buff)
 
-def ABCdisable():
-    global mhz19b
+    def readSensor():
+        #print('send read CO2 command')
+        self.serial.write(b'\xff\x01\x86\x00\x00\x00\x00\x00\x79')	# co2測定値リクエスト
+        utime.sleep(0.1)
+        len = self.serial.readinto(self.buff)
+        #print('read '+str(len)+'bytes ', self.buff)
 
-    mhz19b_data = bytearray(9)
-    mhz19b.write(b'\xff\x01\x79\x00\x00\x00\x00\x00\x86')
-    utime.sleep(0.1)
-    len = mhz19b.readinto(mhz19b_data)
-    
-def readSensor():
-    global mhz19b
+        # co2測定値リクエストの応答
+        if (len < 9) or (self.buff[0] != 0xff) or not checksum_chk(self.buff) or (self.buff[0] != 0xff) or (self.buff[1] != 0x86) :
+            print('read broken frame(' + str(len) + '): ', self.buff)
+            len = self.serial.readinto(self.buff)
+            print('drop broken frame(' + str(len) + '): ', self.buff)
+            return None
 
-    # co2要求コマンド送信
-    print('send read CO2 command')
-    mhz19b_data = bytearray(9)
-    mhz19b.write(b'\xff\x01\x86\x00\x00\x00\x00\x00\x79')   # co2測定値リクエスト
-    utime.sleep(0.1)
-    len = mhz19b.readinto(mhz19b_data)
-    print('read '+str(len)+'bytes')
-    print('read data', mhz19b_data)
-
-    # co2測定値リクエストの応答
-    if (len < 9) or (mhz19b_data[0] != 0xff) or not checksum_chk(mhz19b_data) or (mhz19b_data[0] != 0xff) or (mhz19b_data[1] != 0x86) :
-        len = mhz19b.readinto(mhz19b_data)
-        print('drop broken frame(' + str(len) + '): ') 
-        print(mhz19b_data)
-        return None
-
-    return [mhz19b_data[2] * 256 + mhz19b_data[3], mhz19b_data[4] - 40]
+        return [self.buff[2] * 256 + self.buff[3], self.buff[4] - 40]
 
 
 # メインプログラムはここから（この上はプログラム内関数）
@@ -303,7 +292,7 @@ elif lcd.winsize() == (136,241) :
 
 
 # MH-19B UART設定
-mhz19bOpen()
+mhz19b = mhz19blib()
 
 
 # ユーザー設定ファイル読み込み
@@ -311,19 +300,9 @@ co2_set_filechk()
 
 
 # ネットワーク設定
-am_co2 = None
-import wifiCfg
-try:
-    wifiCfg.autoConnect(lcdShow=True)
-except:
-    print('Network is down. / date is invalid now.')
-else:
-    if (AM_CID is not None) and (AM_WKEY is not None) : # Ambient設定情報があった場合
-        # Ambient設定
-        import ambient
-        am_co2 = ambient.Ambient(AM_CID, AM_WKEY)
-        # RTC設定
-        ntp = ntptime.client(host='jp.pool.ntp.org', timezone=9)
+wifiCfg.autoConnect(lcdShow=True)
+am_co2 = ambient.Ambient(AM_CID, AM_WKEY)
+ntp = ntptime.client(host='jp.pool.ntp.org', timezone=9)
 
 
 # 画面アップデート
@@ -341,7 +320,7 @@ btnB.wasPressed(buttonB_wasPressed)
 
 
 # ABC disable
-ABCdisable()
+mhz19b.ABCdisable()
 
 
 # タイムカウンタ初期値設定
@@ -352,7 +331,7 @@ am_tc = utime.time()
 # メインルーチン
 while True :
     if (utime.time() - mhz19b_tc) >= mhz19b_interval : 
-        data = readSensor()
+        data = mhz19b.readSensor()
         if data is not None :
             mhz19b_tc = utime.time()
             co2 = data[0]
@@ -360,7 +339,7 @@ while True :
             data_mute = False
             draw_co2()
             print(str(co2) + ' ppm / ' + str(temp) + 'C / ' + str(mhz19b_tc))
-            if (am_co2 is not None) :                           # Ambient設定情報があった場合
+            if (AM_CID is not None) and (AM_WKEY is not None) : # Ambient設定情報があった場合
                 if (utime.time() - am_tc) >= am_interval :      # インターバル値の間隔でAmbientへsendする
                     try :                                       # ネットワーク不通発生などで例外エラー終了されない様に try except しとく
                         r = am_co2.send({'d1': co2, 'd2': temp})
