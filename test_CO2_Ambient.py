@@ -198,8 +198,10 @@ def draw_time():
 def co2_set_filechk():
     global CO2_RED
     global TIMEOUT
-    global AM_ID
+    global AM_CID
     global AM_WKEY
+    global AM_RKEY
+    global AM_UID
 
     scanfile_flg = False
     for file_name in uos.listdir('/flash') :
@@ -343,6 +345,7 @@ while True :
             draw_co2()
             #print(str(co2) + ' ppm / ' + str(temp) + 'C / ' + str(mhz19b_tc))
             if (AM_CID is not None) and (AM_WKEY is not None) : # Ambient設定情報があった場合
+                #print("ambient setting is valid.")
                 if (utime.time() - am_tc) >= am_interval :      # インターバル値の間隔でAmbientへsendする
                     try :                                       # ネットワーク不通発生などで例外エラー終了されない様に try except しとく
                         r = am_co2.send({'d1': co2})
