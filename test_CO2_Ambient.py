@@ -241,28 +241,28 @@ def co2_set_filechk():
 # MH-Z19B control functions
 # see https://revspace.nl/MHZ19
 class mhz19blib(object):
-    def __init__():
+    def __init__(self):
         self.buff = bytearray(9)
         self.serial = machine.UART(1, tx=0, rx=26)
         self.serial.init(9600, bits=8, parity=None, stop=1)
 
-    def checksum_chk(data):
+    def checksum_chk(self):
         sum = 0
-        for a in data[1:8]:
+        for a in self.buff[1:8]:
             sum = (sum + a) & 0xff
         c_sum = 0xff - sum + 1
-        if c_sum == data[8]:
+        if c_sum == self.buff[8]:
             return True
         else:
             print("c_sum un match!!")
             return False
 
-    def ABCdisable():
+    def ABCdisable(self):
         self.serial.write(b'\xff\x01\x79\x00\x00\x00\x00\x00\x86')	# auto caliblation off
         utime.sleep(0.1)
         len = self.serial.readinto(self.buff)
 
-    def readSensor():
+    def readSensor(self):
         #print('send read CO2 command')
         self.serial.write(b'\xff\x01\x86\x00\x00\x00\x00\x00\x79')	# co2測定値リクエスト
         utime.sleep(0.1)
@@ -270,7 +270,7 @@ class mhz19blib(object):
         #print('read '+str(len)+'bytes ', self.buff)
 
         # co2測定値リクエストの応答
-        if (len < 9) or (self.buff[0] != 0xff) or not checksum_chk(self.buff) or (self.buff[0] != 0xff) or (self.buff[1] != 0x86) :
+        if (len < 9) or (self.buff[0] != 0xff) or not self.checksum_chk() or (self.buff[0] != 0xff) or (self.buff[1] != 0x86) :
             print('read broken frame(' + str(len) + '): ', self.buff)
             len = self.serial.readinto(self.buff)
             print('drop broken frame(' + str(len) + '): ', self.buff)
