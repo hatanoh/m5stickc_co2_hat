@@ -306,8 +306,10 @@ import wifiCfg
 wifiCfg.autoConnect(lcdShow=True)
 ntp = ntptime.client(host='jp.pool.ntp.org', timezone=9)
 
-import ambient
-am_co2 = ambient.Ambient(AM_CID, AM_WKEY)
+am_co2 = None
+if (AM_CID is not None) and (AM_WKEY is not None) : # Ambient設定情報があった場合
+    import ambient
+    am_co2 = ambient.Ambient(AM_CID, AM_WKEY)
 
 
 # 画面アップデート
@@ -344,17 +346,17 @@ while True :
             data_mute = False
             draw_co2()
             #print(str(co2) + ' ppm / ' + str(temp) + 'C / ' + str(mhz19b_tc))
-            if (AM_CID is not None) and (AM_WKEY is not None) : # Ambient設定情報があった場合
+            if am_co2 is not None : # Ambient設定情報があった場合
                 #print("ambient setting is valid.")
                 if (utime.time() - am_tc) >= am_interval :      # インターバル値の間隔でAmbientへsendする
                     try :                                       # ネットワーク不通発生などで例外エラー終了されない様に try except しとく
-                        r = am_co2.send({'d1': co2})
+                        r = am_co2.send({'d1': co2, "d2": temp})
                         print('Ambient send OK! / ' + str(r.status_code) + ' / ' + str(Am_err))
                         Am_err = 0
                         r.close()
                     except:
                         print('Ambient send ERR! / ' + str(Am_err))
-                        Am_err = Am_err + 1
+                        Am_err += 1
                     am_tc = utime.time()
         utime.sleep(1)
     
