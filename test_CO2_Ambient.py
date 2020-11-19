@@ -8,6 +8,7 @@ import _thread
 import wifiCfg
 import ntptime
 import ambient
+import unit
 
 # 変数宣言(ワーク)
 Am_err              = 1     # グローバル
@@ -17,7 +18,10 @@ lcd_mute            = False # グローバル
 data_mute           = False # グローバル
 m5type              = 0     # グローバル [0:M5StickC、1: M5StickCPlus]
 co2                 = None  # グローバル 現在のCO2値
+mzhtemp             = None
 temp                = None  # グローバル 現在の温度
+hum                 = None
+pres                = None
 
 
 # 変数宣言(定数)
@@ -64,12 +68,12 @@ def disp_thread():
             LEDstate = (LED_mode < 0)
 
         # LEDの状態が変わらない場合はスキップ
-#        if prevLED != LEDstate :
-#            if LEDstate :
-#                M5LED.on()
-#            else :
-#                M5LED.off()
-#            prevLED = LEDstate
+        if prevLED != LEDstate :
+            if LEDstate :
+                M5Led.on()
+            else :
+                M5Led.off()
+            prevLED = LEDstate
 
         # 表示する情報が変わらない場合はスキップ
         tc = (utime.time(), Disp_mode, bool(Am_err))
@@ -125,7 +129,7 @@ def draw_co2():
     global Disp_mode, m5type
     global lcd_mute, data_mute
     global CO2_RED
-    global co2, temp
+    global co2, mzhtemp
 
     if data_mute or (co2 is None) : # タイムアウトで表示ミュートされてるか、初期値のままならco2値非表示（黒文字化）
         fc = lcd.BLACK
@@ -297,6 +301,10 @@ elif lcd.winsize() == (136,241) :
 mhz19b = mhz19blib()
 
 
+# env2 unit
+env21 = unit.get(unit.ENV2, unit.PORTA)
+
+
 # ユーザー設定ファイル読み込み
 co2_set_filechk()
 
@@ -338,11 +346,15 @@ am_tc = 0
 # メインルーチン
 while True :
     if (utime.time() - mhz19b_tc) >= mhz19b_interval : 
+        temp = env21.temperature
+        hum = env21.humidity
+        pres = env21.pressure
+
         data = mhz19b.readSensor()
         if data is not None :
             mhz19b_tc = utime.time()
             co2 = data[0]
-            temp = data[1]
+            mzhtemp = data[1]
             data_mute = False
             draw_co2()
             #print(str(co2) + ' ppm / ' + str(temp) + 'C / ' + str(mhz19b_tc))
@@ -350,7 +362,7 @@ while True :
                 #print("ambient setting is valid.")
                 if (utime.time() - am_tc) >= am_interval :      # インターバル値の間隔でAmbientへsendする
                     try :                                       # ネットワーク不通発生などで例外エラー終了されない様に try except しとく
-                        r = am_co2.send({'d1': co2, "d2": temp})
+                        r = am_co2.send({'d1': co2, "d2": mzhtemp, "d3": temp, "d4": hum, "d5": pres})
                         print('Ambient send OK! / ' + str(r.status_code) + ' / ' + str(Am_err))
                         Am_err = 0
                         r.close()
