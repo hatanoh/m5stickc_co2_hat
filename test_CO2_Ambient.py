@@ -20,14 +20,15 @@ m5type              = 0     # グローバル [0:M5StickC、1: M5StickCPlus]
 
 # 変数宣言(測定値)
 co2                 = None  # CO2値
-mzhtemp             = None  # MHZ19Bの温度
+mhztemp             = None  # MHZ19Bの温度
 temp                = None  # 温度
 hum                 = None  # 湿度
 pres                = None  # 気圧
 
 # 変数宣言(定数)
 am_interval         = 60    # Ambientへデータを送るサイクル（秒）
-sensorb_interval    = 5     # MH-19Bへco2測定値要求コマンドを送るサイクル（秒）
+co2sensor_interval  = 5     # MH-19Bへco2測定値要求コマンドを送るサイクル（秒）
+env2sensor_interval = 5     # env2hatからデータを読み出すサイクル（秒）
 
 # 変数宣言(コンフィグ)
 CO2_RED             = 1000  # co2濃度の換気閾値（ppm）のデフォルト値
@@ -54,19 +55,16 @@ axp = AXPCompat()
 def am_thread():
     global am_interval
 
-    global S_CO2HAT
-    global S_ENV2
+    global S_CO2HAT, S_ENV2
 
+    global Am_err
     global AM_CID
     global AM_WKEY
     global AM_RKEY
     global AM_UID
 
-    global co2
-    global mzhtemp
-    global temp
-    global hum
-    global pres
+    global co2, mhztemp
+    global temp, hum, pres
 
     if (AM_CID is not None) and (AM_WKEY is not None) and (S_CO2HAT or S_ENV2) : # Ambient設定情報があった場合 / どちらかのセンサがあった場合
         import ambient
@@ -74,6 +72,7 @@ def am_thread():
         print("ambient thread start")
         data = {}
         am_tc = 0
+        Am_err = 1
         while True:
             if (utime.time() - am_tc) >= am_interval :      # インターバル値の間隔でAmbientへsendする
                 data.clear()
@@ -90,7 +89,7 @@ def am_thread():
 
                 if len(data) > 0 :
                     try :
-                        r = am_co2.send(data);
+                        r = am_co2.send(data)
                         print('Ambient send OK! / ' + str(r.status_code) + ' / ' + str(Am_err))
                         Am_err = 0
                         r.close()
@@ -175,8 +174,15 @@ def draw_lcd():
         elif m5type == 1 :
             lcd.line(112, 0, 112, 240, lcd.LIGHTGREY)
     draw_co2()
+    draw_temp()
     draw_time()
 
+def draw_temp():
+    global Disp_mode, m5type
+    global temp, hum, pres
+
+    print("env2:", temp, hum, pres)
+    return
 
 # CO2値表示処理関数
 def draw_co2():
@@ -260,6 +266,8 @@ def co2_set_filechk():
     global AM_WKEY
     global AM_RKEY
     global AM_UID
+    global S_CO2HAT
+    global S_ENV2
 
     scanfile_flg = False
     for file_name in uos.listdir('/flash') :
@@ -324,10 +332,11 @@ class mhz19blib(object):
             return False
 
     def ABCdisable(self):
+        #print('send ABC disable command')
         self.serial.write(b'\xff\x01\x79\x00\x00\x00\x00\x00\x86')	# auto caliblation off
         utime.sleep(0.1)
-        len = self.serial.readinto(self.buff)
-
+        self.serial.readinto(self.buff)
+        
     def readSensor(self):
         #print('send read CO2 command')
         self.serial.write(b'\xff\x01\x86\x00\x00\x00\x00\x00\x79')	# co2測定値リクエスト
@@ -381,6 +390,7 @@ draw_lcd()
 
 # 時刻表示/LED制御スレッド起動
 _thread.start_new_thread(disp_thread, ())
+_thread.start_new_thread(am_thread, ())
 
 
 # ボタン検出スレッド起動
@@ -389,35 +399,41 @@ btnB.wasPressed(buttonB_wasPressed)
 
 
 # ABC disable
-mhz19b.ABCdisable()
+if mhz19b is not None :
+    mhz19b.ABCdisable()
 
 
 # タイムカウンタ初期値設定
-sensor_tc = utime.time()
+co2sensor_tc = utime.time()
+env2sensor_tc = utime.time()
 
 
 # メインルーチン
 while True :
-    if (utime.time() - sensor_tc) >= sensor_interval : 
-        if env2 is not None :
+    if env2 is not None :
+        if (utime.time() - env2sensor_tc) >= env2sensor_interval : 
+            env2sensor_tc = utime.time()
             temp = env2.temperature
             hum = env2.humidity
             pres = env2.pressure
+            draw_temp()
+            #print("env2:", temp, hum, pres)
 
-        if mhz19b is not None :
+    if mhz19b is not None :
+        if (utime.time() - co2sensor_tc) >= co2sensor_interval : 
             data = mhz19b.readSensor()
             if data is not None :
-                sensor_tc = utime.time()
+                co2sensor_tc = utime.time()
                 co2 = data[0]
                 mzhtemp = data[1]
                 data_mute = False
                 draw_co2()
                 #print(str(co2) + ' ppm / ' + str(temp) + 'C / ' + str(sensor_tc))
-        utime.sleep(1)
+    utime.sleep(1)
     
-    if not data_mute and ((utime.time() - sensor_tc) >= TIMEOUT) : # co2応答が一定時間無い場合はCO2値表示のみオフ
+    if not data_mute and ((utime.time() - co2sensor_tc) >= TIMEOUT) : # co2応答が一定時間無い場合はCO2値表示のみオフ
         data_mute = True
         draw_co2()
-        
+
     utime.sleep(0.1)
     gc.collect()    
