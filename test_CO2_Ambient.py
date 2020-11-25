@@ -17,23 +17,27 @@ LED_mode            = 0     # グローバル [-1:点灯/0:消灯/1～:点滅周
 lcd_mute            = False # グローバル
 data_mute           = False # グローバル
 m5type              = 0     # グローバル [0:M5StickC、1: M5StickCPlus]
-co2                 = None  # グローバル 現在のCO2値
-mzhtemp             = None
-temp                = None  # グローバル 現在の温度
-hum                 = None
-pres                = None
 
+# 変数宣言(測定値)
+co2                 = None  # CO2値
+mzhtemp             = None  # MHZ19Bの温度
+temp                = None  # 温度
+hum                 = None  # 湿度
+pres                = None  # 気圧
 
 # 変数宣言(定数)
 am_interval         = 60    # Ambientへデータを送るサイクル（秒）
-mhz19b_interval     = 5     # MH-19Bへco2測定値要求コマンドを送るサイクル（秒）
-TIMEOUT             = 30    # 何らかの事情でCO2更新が止まった時のタイムアウト（秒）のデフォルト値
+sensorb_interval    = 5     # MH-19Bへco2測定値要求コマンドを送るサイクル（秒）
+
+# 変数宣言(コンフィグ)
 CO2_RED             = 1000  # co2濃度の換気閾値（ppm）のデフォルト値
-#
+TIMEOUT             = 30    # データ更新が止まった時のタイムアウト（秒）のデフォルト値
 AM_CID              = None
 AM_WKEY             = None
 AM_RKEY             = None
 AM_UID              = None
+S_CO2HAT            = False
+S_ENV2              = False
 
 
 # @cinimlさんのファーム差分吸収ロジック
@@ -45,6 +49,56 @@ class AXPCompat(object):
             self.setLDO2Vol = axp.setLDO2Volt
 
 axp = AXPCompat()
+
+
+def am_thread():
+    global am_interval
+
+    global S_CO2HAT
+    global S_ENV2
+
+    global AM_CID
+    global AM_WKEY
+    global AM_RKEY
+    global AM_UID
+
+    global co2
+    global mzhtemp
+    global temp
+    global hum
+    global pres
+
+    if (AM_CID is not None) and (AM_WKEY is not None) and (S_CO2HAT or S_ENV2) : # Ambient設定情報があった場合 / どちらかのセンサがあった場合
+        import ambient
+        am_co2 = ambient.Ambient(AM_CID, AM_WKEY)
+        print("ambient thread start")
+        data = {}
+        am_tc = 0
+        while True:
+            if (utime.time() - am_tc) >= am_interval :      # インターバル値の間隔でAmbientへsendする
+                data.clear()
+                if (co2 is not None) :
+                    data["d1"] = co2
+                if (mhztemp is not None) :
+                    data["d2"] = mhztemp
+                if (temp is not None) :
+                    data["d3"] = temp
+                if (hum is not None) :
+                    data["d4"] = hum
+                if (pres is not None) :
+                    data["d5"] = pres
+
+                if len(data) > 0 :
+                    try :
+                        r = am_co2.send(data);
+                        print('Ambient send OK! / ' + str(r.status_code) + ' / ' + str(Am_err))
+                        Am_err = 0
+                        r.close()
+                    except:
+                        print('Ambient send ERR! / ' + str(Am_err))
+                        Am_err += 1
+                    am_tc = utime.time()
+            utime.sleep(1)
 
 
 # 時計表示/LEDスレッド関数
@@ -239,6 +293,12 @@ def co2_set_filechk():
                 elif filetxt[0] == 'AM_UID' :
                     AM_UID = str(filetxt[1])
                     print('- AM_UID: ' + str(AM_UID))
+                elif filetxt[0] == 'S_CO2HAT' :
+                    S_CO2HAT = filetxt[1].lower() == "true"
+                    print('- S_CO2HAT: ' + str(S_CO2HAT))
+                elif filetxt[0] == 'S_ENV2' :
+                    S_ENV2 = filetxt[1].lower() == "true"
+                    print('- S_ENV2: ' + str(S_ENV2))
     else :
         print('>> no [co2_set.txt] !')       
     return scanfile_flg
@@ -297,28 +357,22 @@ elif lcd.winsize() == (136,241) :
     print('>> M5Type = M5StickCPlus')
 
 
+# ユーザー設定ファイル読み込み
+co2_set_filechk()
+
+
 # MH-19B UART設定
-mhz19b = mhz19blib()
+mhz19b = mhz19blib() if S_CO2HAT else None
 
 
 # env2 unit
-env21 = unit.get(unit.ENV2, unit.PORTA)
-
-
-# ユーザー設定ファイル読み込み
-co2_set_filechk()
+env2 = unit.get(unit.ENV2, unit.PORTA) if S_ENV2 else None
 
 
 # ネットワーク設定
 import wifiCfg
 wifiCfg.autoConnect(lcdShow=True)
 ntp = ntptime.client(host='jp.pool.ntp.org', timezone=9)
-
-am_co2 = None
-if (AM_CID is not None) and (AM_WKEY is not None) : # Ambient設定情報があった場合
-    import ambient
-    am_co2 = ambient.Ambient(AM_CID, AM_WKEY)
-
 
 # 画面アップデート
 set_muteLCD(lcd_mute)
@@ -339,40 +393,29 @@ mhz19b.ABCdisable()
 
 
 # タイムカウンタ初期値設定
-mhz19b_tc = utime.time()
-am_tc = 0
+sensor_tc = utime.time()
 
 
 # メインルーチン
 while True :
-    if (utime.time() - mhz19b_tc) >= mhz19b_interval : 
-        temp = env21.temperature
-        hum = env21.humidity
-        pres = env21.pressure
+    if (utime.time() - sensor_tc) >= sensor_interval : 
+        if env2 is not None :
+            temp = env2.temperature
+            hum = env2.humidity
+            pres = env2.pressure
 
-        data = mhz19b.readSensor()
-        if data is not None :
-            mhz19b_tc = utime.time()
-            co2 = data[0]
-            mzhtemp = data[1]
-            data_mute = False
-            draw_co2()
-            #print(str(co2) + ' ppm / ' + str(temp) + 'C / ' + str(mhz19b_tc))
-            if am_co2 is not None : # Ambient設定情報があった場合
-                #print("ambient setting is valid.")
-                if (utime.time() - am_tc) >= am_interval :      # インターバル値の間隔でAmbientへsendする
-                    try :                                       # ネットワーク不通発生などで例外エラー終了されない様に try except しとく
-                        r = am_co2.send({'d1': co2, "d2": mzhtemp, "d3": temp, "d4": hum, "d5": pres})
-                        print('Ambient send OK! / ' + str(r.status_code) + ' / ' + str(Am_err))
-                        Am_err = 0
-                        r.close()
-                    except:
-                        print('Ambient send ERR! / ' + str(Am_err))
-                        Am_err += 1
-                    am_tc = utime.time()
+        if mhz19b is not None :
+            data = mhz19b.readSensor()
+            if data is not None :
+                sensor_tc = utime.time()
+                co2 = data[0]
+                mzhtemp = data[1]
+                data_mute = False
+                draw_co2()
+                #print(str(co2) + ' ppm / ' + str(temp) + 'C / ' + str(sensor_tc))
         utime.sleep(1)
     
-    if not data_mute and ((utime.time() - mhz19b_tc) >= TIMEOUT) : # co2応答が一定時間無い場合はCO2値表示のみオフ
+    if not data_mute and ((utime.time() - sensor_tc) >= TIMEOUT) : # co2応答が一定時間無い場合はCO2値表示のみオフ
         data_mute = True
         draw_co2()
         
