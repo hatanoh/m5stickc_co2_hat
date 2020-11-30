@@ -11,12 +11,11 @@ import ambient
 import unit
 
 # 変数宣言(ワーク)
+m5type              = 0     # グローバル [0:M5StickC、1: M5StickCPlus]
 Am_err              = 1     # グローバル
 Disp_mode           = 0     # グローバル
 LED_mode            = 0     # グローバル [-1:点灯/0:消灯/1～:点滅周期(0.1s単位)]
 lcd_mute            = False # グローバル
-data_mute           = False # グローバル
-m5type              = 0     # グローバル [0:M5StickC、1: M5StickCPlus]
 
 # 変数宣言(測定値)
 co2                 = None  # CO2値
@@ -53,15 +52,13 @@ axp = AXPCompat()
 
 
 def am_thread():
-    global am_interval
-
     global S_CO2HAT, S_ENV2
 
+    global am_interval
+
     global Am_err
-    global AM_CID
-    global AM_WKEY
-    global AM_RKEY
-    global AM_UID
+    global AM_CID, AM_UID
+    global AM_WKEY, AM_RKEY
 
     global co2, mhztemp
     global temp, hum, pres
@@ -108,7 +105,7 @@ def disp_thread():
     cnt = 0
     LEDstate = True
     prevLED = None
-    prev = None
+    prev_tc = None
 
     while True:
         if LED_mode > 0 :       # 点滅
@@ -130,9 +127,9 @@ def disp_thread():
 
         # 表示する情報が変わらない場合はスキップ
         tc = (utime.time(), Disp_mode, bool(Am_err))
-        if prev != tc : 
+        if prev_tc != tc : 
             draw_time()
-            prev = tc
+            prev_tc = tc
 
         utime.sleep(0.1)
 
@@ -177,21 +174,23 @@ def draw_lcd():
     draw_temp()
     draw_time()
 
+# 温度表示処理関数
 def draw_temp():
     global Disp_mode, m5type
     global temp, hum, pres
 
+    # not yet
     print("env2:", temp, hum, pres)
     return
 
 # CO2値表示処理関数
 def draw_co2():
     global Disp_mode, m5type
-    global lcd_mute, data_mute
+    global lcd_mute
     global CO2_RED
     global co2, mzhtemp
 
-    if data_mute or (co2 is None) : # タイムアウトで表示ミュートされてるか、初期値のままならco2値非表示（黒文字化）
+    if co2 is None : # タイムアウトで表示ミュートされてるか、初期値のままならco2値非表示（黒文字化）
         fc = lcd.BLACK
     elif co2 >= CO2_RED :  # CO2濃度閾値超え時は文字が赤くなる
         fc = lcd.RED
@@ -312,6 +311,70 @@ def co2_set_filechk():
     return scanfile_flg
 
 
+class display(object):
+    def __init__(self):
+        (self.Xsiz, self.Ysiz) = lcd.winsize()
+        self.direction = 0
+        self.time = M5TextBox(131, 30, "", lcd.FONT_DejaVu18, 0xFFFFFF, rotate=90)
+        self.line = M5Line(M5Line.PLINE, 112, 0, 112, 240, 0xFFFFFF)
+        self.co2 = M5TextBox(74, 0, "", lcd.FONT_DejaVu40, 0xFFFFFF, rotate=90)
+        self.co2unit = M5TextBox(36, 53, "ppm", lcd.FONT_DejaVu24, 0xFFFFFF, rotate=90)
+        self.temp = M5TextBox(86, 119, "", lcd.FONT_DejaVu24, 0xFFFFFF, rotate=90)
+        self.tempUnit = M5TextBox(86, 199, "C", lcd.FONT_DejaVu18, 0xFFFFFF, rotate=90)
+        self.hum = M5TextBox(54, 119, "", lcd.FONT_DejaVu24, 0xFFFFFF, rotate=90)
+        self.humUnit = M5TextBox(54, 199, "%", lcd.FONT_DejaVu18, 0xFFFFFF, rotate=90)
+        self.pres = M5TextBox(24, 119, "", lcd.FONT_DejaVu18, 0xFFFFFF, rotate=90)
+        self.presUnit = M5TextBox(24, 200, "hPa", lcd.FONT_DejaVu18, 0xFFFFFF, rotate=90)
+
+    def set_dispmode(self, mode):
+        return None
+
+    def set_param(self, x, y, r):
+        if r == 90 :
+            return (x, y, r)
+        elif r == 270 :
+            return (Xsiz - x, Ysiz - y, r)
+        return None
+
+    def set_direction(self, dir):
+        (x, y, r) = self.set_param(31, 30, dir)
+        self.time.setPosition(x, y)
+        self.time.setRotate(r)
+        (x1, y1, r) = self.set_param(112, 0, dir)
+        (x2, y2, r) = self.set_param(112, 240, dir)
+        self.line.setSize(x1, y1, x2, y1)
+        self.co2.setPosition(74, 0)
+        self.co2.setRotate(90)
+        self.co2unit.setPosition(36, 53)
+        self.co2unit.setRotate(90)
+        self.temp.setPosition(86, 119)
+        self.temp.setRotate(90)
+        self.tempUnit.setPosition(86, 199)
+        self.tempUnit.setRotate(90)
+        self.hum.setPosition(54, 119)
+        self.hum.setRotate(90)
+        self.humUnit.setPosition(54, 199)
+        self.humUnit.setRotate(90)
+        self.pres.setPosition(24, 119)
+        self.pres.setRotate(90)
+        self.presUnit.setPosition(24, 199)
+        self.presUnit.setRotate(90)
+
+    def setdisp_co2(self, disp):
+
+    def setdisp_env(self, disp):
+
+    def draw_time(self, time):
+
+    def draw_co2(self, co2, mhz19temp):
+
+    def draw_env(self, temp, hum, pres):
+
+    def redraw():
+
+
+
+
 # MH-Z19B control functions
 # see https://revspace.nl/MHZ19
 class mhz19blib(object):
@@ -370,11 +433,8 @@ elif lcd.winsize() == (136,241) :
 co2_set_filechk()
 
 
-# MH-19B UART設定
+# センサー初期化
 mhz19b = mhz19blib() if S_CO2HAT else None
-
-
-# env2 unit
 env2 = unit.get(unit.ENV2, unit.PORTA) if S_ENV2 else None
 
 
@@ -388,7 +448,7 @@ set_muteLCD(lcd_mute)
 draw_lcd()
 
 
-# 時刻表示/LED制御スレッド起動
+# 時刻表示/LED制御スレッド、ambient通知スレッド起動
 _thread.start_new_thread(disp_thread, ())
 _thread.start_new_thread(am_thread, ())
 
@@ -426,14 +486,12 @@ while True :
                 co2sensor_tc = utime.time()
                 co2 = data[0]
                 mzhtemp = data[1]
-                data_mute = False
                 draw_co2()
                 #print(str(co2) + ' ppm / ' + str(temp) + 'C / ' + str(sensor_tc))
-    utime.sleep(1)
-    
-    if not data_mute and ((utime.time() - co2sensor_tc) >= TIMEOUT) : # co2応答が一定時間無い場合はCO2値表示のみオフ
-        data_mute = True
+
+    if (co2 is not None) and ((utime.time() - co2sensor_tc) >= TIMEOUT) : # co2応答が一定時間無い場合はCO2値表示のみオフ
+        co2 = None
         draw_co2()
 
-    utime.sleep(0.1)
+    utime.sleep(1)
     gc.collect()    
